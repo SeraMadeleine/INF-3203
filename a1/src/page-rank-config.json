@@ -1,0 +1,11 @@
+{
+    "mr_def_path": "page-rank-mapper.py",
+    "input_path": "data-pr/input-large.txt",
+    "tmp_folder": "mr_tmp/",
+    "output_file": "mr_tmp/output-pr.txt",
+    "mappers": 4,
+    "reducers": 4,
+    "nodes": ["c3-21", "c3-0", "c10-1", "c3-32", "c2-12", "c8-2", "c9-2", "c3-4", "c3-9", "c3-5"],
+    "local": true,
+    "input_scale": 1
+}

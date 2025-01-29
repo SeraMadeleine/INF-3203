@@ -1,0 +1,4 @@
+This folder contains three datasets:
+input-large.txt is a Wikipedia graph dataset from 2018. It lists all Wikipedia articles, and their outgoing links.
+input-small.txt is the same dataset based on data from 2006 instead, it is older and thus smaller.
+input-mini.txt is a small excerpt of the first elements of the small dataset, which can be used for easier debugging. 
