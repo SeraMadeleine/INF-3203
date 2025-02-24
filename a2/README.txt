@@ -7,5 +7,5 @@ chmod +x run.sh
 This gives a new output_id to the client and all servers based on current time.
 
 Check log correctness:
-python3 log-compare.py log-comparer <output_id>
+python3 log-comparer.py <output_id>
 
