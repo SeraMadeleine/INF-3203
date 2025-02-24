@@ -1,0 +1,8 @@
+# ignore mav files 
+.DS_Store 
+
+# ignore venv files
+**/.venv/
+
+# ignore pycache files 
+**/__pycache__/
