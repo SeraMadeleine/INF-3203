@@ -1,0 +1,2 @@
+# Ignor al .csv-files in src/output
+src/output/*.csv
