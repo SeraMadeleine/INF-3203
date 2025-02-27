@@ -45,7 +45,7 @@ class RaftStateMachine:
         if term >= self.term:
             for entry in entries:
                 self.log.append(entry)
-        
+                    
         if term > self.term:
             self.term = term
             self.leader = leaderId
