@@ -5,6 +5,12 @@ import socketserver
 import signal
 import socket
 from raft import RaftStateMachine
+import logging
+import json
+
+
+# Configure logging to print debug messages
+logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(message)s')
 
 
 ''' 
@@ -22,7 +28,7 @@ except IndexError:
 
 crashed = False     # Flag to simulate a crash
 local_log = []      # List to store log entries
-raftStateMachine = RaftStateMachine(nodes_list)
+raftStateMachine = RaftStateMachine(nodes_list, address)
 
 class LogRequestHandler(http.server.SimpleHTTPRequestHandler):
 
@@ -39,10 +45,12 @@ class LogRequestHandler(http.server.SimpleHTTPRequestHandler):
         print(f"{self.server.server_address} Received PUT request with data: {data}")
         
         # Current logging logic is simple: it just appends the data to a list.
-        local_log.append(data) # TODO: denne skal byttes ut med logikk for å legge til i loggen til RaftStateMachine
+        # local_log.append(data) # TODO: denne skal byttes ut med logikk for å legge til i loggen til RaftStateMachine
         # follower/candidates - send til leder 
             # Hvis leder ikke svarer - start election. Ta vare på i en lokal liste hvor du tar vare på info frem til leder sier ok 
         # Leader - append til log
+
+        raftStateMachine.receiveEntries(data)
 
         self.send_response(200)
         self.end_headers()
@@ -73,22 +81,98 @@ class LogRequestHandler(http.server.SimpleHTTPRequestHandler):
         # If the server receives a POST request to /exit, it should write its log to a file and exit.
         elif url == "/exit":
             print(f"{self.server.server_address} Exiting...")
+            if raftStateMachine.timer:
+                raftStateMachine.timer.cancel()
             self.send_response(200)
             self.end_headers()
             print(f"{self.server.server_address}: {local_log}")
             with open(f"output/{output_id}-server-{self.server.server_address[0]}{self.server.server_address[1]}.csv", 'w') as f:
-                for entry in local_log:
+                for entry in raftStateMachine.log:
                     f.write(f"{entry}\n")
+
+        
 
         elif url == "/rpc/appendEntries":
             # kun leader 
             print(f"{self.server.server_address} Received POST request to /rpc/appendEntries")
+            content_length = int(self.headers['Content-Length'])
+
+            # append entries kommer som json 
+            if self.headers['Content-Type'] != 'application/json':
+                logging.error(f"{self.server.server_address} Received POST request with invalid Content-Type")
+                return
             
-        
+            data = self.rfile.read(content_length).decode('utf-8').strip()
+
+            try: 
+                data = json.loads(data)
+                term = data.get("term")
+                leaderId = data.get("leaderId")
+                entries = data.get("entries")
+            except json.JSONDecodeError:
+                logging.error(f"{self.server.server_address} Received POST request with invalid JSON")
+                self.send_response(400)
+                self.end_headers()
+                return
+            
+
+            success = raftStateMachine.appendEntries(term, leaderId, None, None, entries, None)
+            response_data = json.dumps({"success": success})
+            self.send_response(200)
+            self.end_headers()
+            # self.wfile.write(response_data.encode())
+
+            logging.info(f"Node {self.server.server_address} received AppendEntries from {leaderId} and responded with {success}")
+
+
+        elif url == "/rpc/leader":
+            content_length = int(self.headers['Content-Length'])
+            data = self.rfile.read(content_length).decode('utf-8').strip()
+
+            try:
+                request_data = json.loads(data)
+                raftStateMachine.leader = request_data["leader"]
+                logging.info(f"Node {self.server.server_address} recognizes {raftStateMachine.leader} as the leader")
+            except json.JSONDecodeError:
+                logging.error(f"Invalid JSON in leader notification")
+            
+            self.send_response(200)
+            self.end_headers()
+    
+  
         elif url == "/rpc/requestVote":
             # kun candidate 
-            print(f"{self.server.server_address} Received POST request to /rpc/requestVote")
-            
+            print(f"{self.server.server_address} Received POST request to /rpc/requestVote")      
+            content_length = int(self.headers['Content-Length'])
+            data = self.rfile.read(content_length).decode('utf-8').strip()
+
+            try: 
+                request_data = json.loads(data)
+                term = request_data.get("term")
+                candidate = request_data.get("candidateId")
+            except json.JSONDecodeError:
+                logging.error(f"{self.server.server_address} Received POST request with invalid JSON")
+                self.send_response(400)
+                self.end_headers()
+                return
+
+            vote_granted = False
+
+            if term > raftStateMachine.term:
+                raftStateMachine.term = term
+                raftStateMachine.votedFor = candidate
+                vote_granted = True
+            else: 
+                vote_granted = True 
+
+            response_data = json.dumps({"voteGranted": vote_granted})
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(response_data.encode())
+
+            logging.debug(f"Node {self.server.server_address} voted {'YES' if vote_granted else 'NO'} for {candidate} in term {term}")
+
+
 
 def start_server(address):
     ''' 
