@@ -6,6 +6,7 @@ import threading
 import time
 import sys
 import os
+import json
 from urllib.parse import urlparse
 
 try:
@@ -17,17 +18,22 @@ except ValueError:
 
 lorem_ipsum = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua".split()
 
+
 def put_log_entries(sc):
     warnings = 0
 
     for i in range(sc.total_entries):
         target_node = random.choice(nodes_list)
         word = random.choice(lorem_ipsum) + str(random.randrange(10000000))
-        word_bytes = word.encode('utf-8')
+        
+        # Make sure the data is sent as JSON and the headers are set correctly
+        payload = json.dumps({"entries": word})   
+        headers = {"Content-Type": "application/json"}   
+
         success = False
         try:
             print(f"Sending log entry to {target_node}: {word}")
-            requests.put(f'http://{target_node}', data=word_bytes, timeout=5)
+            requests.put(f'http://{target_node}', data=payload, headers=headers, timeout=5)
             sc.local_entries.append(word)
             success = True
         except requests.exceptions.Timeout:
@@ -45,8 +51,9 @@ def put_log_entries(sc):
                 warnings += 1
         
         time.sleep(random.randint(sc.log_interval[0], sc.log_interval[1]))
-    
-    print("Finished sending log entries, exiting in 10 seconds...")
+
+        print("Finished sending log entries, exiting in 10 seconds...")
+        
     time.sleep(10)
     for node in nodes_list:
         requests.post(f'http://{node}/exit')
@@ -58,6 +65,7 @@ def put_log_entries(sc):
             f.write(f"{entry}\n")
     print(f"Exiting. Output ID=\n{output_id}")
     os._exit(0)
+
 
 def simulate_crash_and_recovery(sc):
     while True:
