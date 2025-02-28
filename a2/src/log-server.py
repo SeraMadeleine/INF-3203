@@ -37,18 +37,21 @@ class LogRequestHandler(http.server.SimpleHTTPRequestHandler):
         
         # If the server is crashed, it should ignore incoming PUT requests and return immediately.
         if crashed:
-            print(f"\n{self.server.server_address} Received PUT request while crashed, ignoring\n")
+            logging.info(f"\n{self.server.server_address} Received PUT request while crashed, ignoring\n")
             return
         
         content_length = int(self.headers['Content-Length'])
-        data = self.rfile.read(content_length).decode('utf-8')
-        print(f"{self.server.server_address} Received PUT request with data: {data}")
-        
-        # Current logging logic is simple: it just appends the data to a list.
-        # local_log.append(data) # TODO: denne skal byttes ut med logikk for å legge til i loggen til RaftStateMachine
-        # follower/candidates - send til leder 
-            # Hvis leder ikke svarer - start election. Ta vare på i en lokal liste hvor du tar vare på info frem til leder sier ok 
-        # Leader - append til log
+        data = self.rfile.read(content_length).decode('utf-8').strip()
+        # logging.debug(f"{self.server.server_address} Received PUT request with data: {data}")
+
+        # If the data is a JSON object with an "entries" key, extract the value of the key.     
+        if data.startswith('{"entries":'):
+            try:
+                data = json.loads(data)["entries"]  
+            except json.JSONDecodeError:
+                pass  
+
+        # logging.debug(f"{self.server.server_address} Received PUT request aftert strippingwith data: {data}")
 
         raftStateMachine.receiveEntries(data)
 
@@ -61,19 +64,19 @@ class LogRequestHandler(http.server.SimpleHTTPRequestHandler):
 
         # If POST is extended, this case should be kept intact and overrule other URLs.
         if crashed and url != "/crash" and url != "/recover" and url != "/exit":
-            print(f"\n{self.server.server_address} Received POST request while crashed, ignoring\n")
+            logging.info(f"\n{self.server.server_address} Received POST request while crashed, ignoring\n")
             return
 
         # If the server receives a POST request to /crash, it should simulate a crash.
         if url == "/crash":
-            print(f"{self.server.server_address} Simulating crash...")
+            logging.info(f"{self.server.server_address} Simulating crash...")
             crashed = True
             self.send_response(200)
             self.end_headers()
         
         # If the server receives a POST request to /recover, it should simulate a recovery.
         elif url == "/recover":
-            print(f"{self.server.server_address} Simulating recovery...")
+            logging.info(f"{self.server.server_address} Simulating recovery...")
             crashed = False
             self.send_response(200)
             self.end_headers()
@@ -81,20 +84,22 @@ class LogRequestHandler(http.server.SimpleHTTPRequestHandler):
         # If the server receives a POST request to /exit, it should write its log to a file and exit.
         elif url == "/exit":
             print(f"{self.server.server_address} Exiting...")
+
             if raftStateMachine.timer:
                 raftStateMachine.timer.cancel()
+
             self.send_response(200)
             self.end_headers()
+            
             print(f"{self.server.server_address}: {local_log}")
             with open(f"output/{output_id}-server-{self.server.server_address[0]}{self.server.server_address[1]}.csv", 'w') as f:
                 for entry in raftStateMachine.log:
-                    f.write(f"{entry}\n")
+                    f.write(f"{entry}")
 
         
-
         elif url == "/rpc/appendEntries":
             # kun leader 
-            print(f"{self.server.server_address} Received POST request to /rpc/appendEntries")
+            logging.debug(f"{self.server.server_address} Received POST request to /rpc/appendEntries")
             content_length = int(self.headers['Content-Length'])
 
             # append entries kommer som json 
@@ -103,26 +108,34 @@ class LogRequestHandler(http.server.SimpleHTTPRequestHandler):
                 return
             
             data = self.rfile.read(content_length).decode('utf-8').strip()
-
+            
             try: 
                 data = json.loads(data)
                 term = data.get("term")
                 leaderId = data.get("leaderId")
-                entries = data.get("entries")
+                entries = data.get("entries", [])
+
+                # Handle the case where entries is a string instead of a list
+                if isinstance(entries, str):
+                    entries = [entries]
+
+                logging.debug(f"{self.server.server_address} Received POST request to /rpc/appendEntries with entries: {entries}")
+
             except json.JSONDecodeError:
                 logging.error(f"{self.server.server_address} Received POST request with invalid JSON")
                 self.send_response(400)
                 self.end_headers()
                 return
             
+           
 
             success = raftStateMachine.appendEntries(term, leaderId, None, None, entries, None)
             response_data = json.dumps({"success": success})
             self.send_response(200)
             self.end_headers()
-            # self.wfile.write(response_data.encode())
 
             logging.info(f"Node {self.server.server_address} received AppendEntries from {leaderId} and responded with {success}")
+
 
 
         elif url == "/rpc/leader":
@@ -142,7 +155,7 @@ class LogRequestHandler(http.server.SimpleHTTPRequestHandler):
   
         elif url == "/rpc/requestVote":
             # kun candidate 
-            print(f"{self.server.server_address} Received POST request to /rpc/requestVote")      
+            logging.debug(f"{self.server.server_address} Received POST request to /rpc/requestVote")      
             content_length = int(self.headers['Content-Length'])
             data = self.rfile.read(content_length).decode('utf-8').strip()
 

@@ -5,7 +5,7 @@ import requests
 import time
 
 # Configure logging to print debug messages
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(message)s')
 
 TIMEOUT_FOLLOWER_MIN = 5000 
 TIMEOUT_FOLLOWER_MAX = 10000
@@ -39,12 +39,13 @@ class RaftStateMachine:
     def __str__(self):
         return self.address
     
+
     # ---------- ENTRIES ---------- #
     def appendEntries(self, term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit):
         logging.debug(f'Node {self}, \n term: {term}, \n leaderId: {leaderId}, \n prevLogIndex: {prevLogIndex}, \n prevLogTerm: {prevLogTerm}, \n entries: {entries}, \n leaderCommit: {leaderCommit}')
         if term >= self.term:
             for entry in entries:
-                self.log.append(entry)
+                self.log.append(f'{entry}\n')
                     
         if term > self.term:
             self.term = term
@@ -57,15 +58,14 @@ class RaftStateMachine:
             self.heartbeat()
             return True
         
-        
-            
-        
         return False
         
+
     def receiveEntries(self, entries):
         if self.state == "leader":
             logging.debug(f"Leader {self} received new log entries: {entries}")
-            self.log.append(entries)
+            self.log.append(f'{entries}\n')     
+
             logging.info(f'log entries in recive entries: {self.log}')
 
             for node in self.nodes:
@@ -197,15 +197,7 @@ class RaftStateMachine:
             logging.debug(f"Node {self} has not received a heartbeat. Starting election.")
             self.candidate()
 
-    # def check_heartbeat(self):
-    #     if self.state == "leader":
-    #         return
 
-    #     if time.time() - self.lastHeartbeat > TIMEOUT_FOLLOWER_MAX:
-    #         logging.debug(f"Node {self} has not received a heartbeat for {TIMEOUT_FOLLOWER_MAX} seconds")
-    #         self.candidate()
-    #     else: 
-    #         self.reset_follower_timeout()
 
     def reset_follower_timeout(self):
         if self.timer is not None:
