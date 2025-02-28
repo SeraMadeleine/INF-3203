@@ -4,13 +4,14 @@ import random
 import requests
 import time
 
-# Configure logging to print debug messages
+# Configure logging to print error, warning, info and/or debug messages
 logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(message)s')
 
-TIMEOUT_FOLLOWER_MIN = 5000 
-TIMEOUT_FOLLOWER_MAX = 10000
-TIMEOUT_CANDIDATE = 12000 
-HEARTBEAT_INTERVAL = 2
+# Timeout values for the different states in the Raft algorithm (milliseconds)
+TIMEOUT_FOLLOWER_MIN = 5000  # 5 seconds
+TIMEOUT_FOLLOWER_MAX = 10000 # 10 seconds
+TIMEOUT_CANDIDATE = 12000    # 12 seconds
+HEARTBEAT_INTERVAL = 2       # 2 seconds
 
 
 class RaftStateMachine: 
@@ -27,10 +28,10 @@ class RaftStateMachine:
         self.address = address
         self.lastHeartbeat = None
 
-        # starte election timer ved initialisering
+        # Start election timer upon initialization
         if self.address == self.nodes[0]:
             logging.info(f"Node {self.address} is the first in the list, starting election.")
-            self.candidate()
+            self.state_candidate()
         else:
             logging.info(f"Node {self.address} is waiting for leader heartbeats.")
             self.reset_follower_timeout()
@@ -43,17 +44,23 @@ class RaftStateMachine:
     # ---------- ENTRIES ---------- #
     def appendEntries(self, term, leaderId, prevLogIndex, prevLogTerm, entries, leaderCommit):
         logging.debug(f'Node {self}, \n term: {term}, \n leaderId: {leaderId}, \n prevLogIndex: {prevLogIndex}, \n prevLogTerm: {prevLogTerm}, \n entries: {entries}, \n leaderCommit: {leaderCommit}')
+        
+        # If the received term is valid (greater than or equal to the current term), add the entries to the log
         if term >= self.term:
             for entry in entries:
-                self.log.append(f'{entry}\n')
-                    
+                # prevent duplicates
+                if entry not in self.log:
+                    self.log.append(f'{entry}\n')
+
+        # If the received term is greater than the current term, update the term and leader information             
         if term > self.term:
             self.term = term
             self.leader = leaderId
             self.heartbeat()
-            self.follower()
+            self.state_follower()
             return True
         
+        # If the term and the leader is the same as the current term and leader, update the heartbeat
         if term == self.term and leaderId == self.leader:
             self.heartbeat()
             return True
@@ -62,28 +69,32 @@ class RaftStateMachine:
         
 
     def receiveEntries(self, entries):
+        # Handles log entries received from the leader or forwards them if the node is not the leader
         if self.state == "leader":
             logging.debug(f"Leader {self} received new log entries: {entries}")
             self.log.append(f'{entries}\n')     
 
             logging.info(f'log entries in recive entries: {self.log}')
 
+            # Send the entries to the followers
             for node in self.nodes:
                 if node != self.address:
                     try: 
                         requests.post(f"http://{node}/rpc/appendEntries", json={"term": self.term, "leaderId": self.address, "entries": entries}, timeout=2)
                     except requests.exceptions.RequestException:
                         logging.warning(f"Node {node} did not respond to appendEntries request from {self.address}")
+        # If the node is a follower, forward the entries to the leader 
         elif self.leader:
             logging.debug(f"Node {self} is forwarding log entries to leader {self.leader}")
             try:
                 requests.put(f"http://{self.leader}/rpc/appendEntries", json={"entries": entries})
             except requests.exceptions.RequestException:
-                logging.warning(f"Leader {self.leader} did not respond to appendEntries request from {self.address}")
-                #TODO: Handle this better
-                
+                logging.warning(f"Leader {self.leader} did not respond to appendEntries request from {self.address}")                
+        # If the node does not know who the leader is, drop the entries
         else:
             logging.warning(f"Node {self} does not know who the leader is. Dropping log entry.")
+            #TODO: handle this better, maybe by returning an error message to client
+
 
 
     # ---------- VOTES ---------- #
@@ -106,9 +117,8 @@ class RaftStateMachine:
 
     # ---------- STATE ---------- #
 
-
-    def get_leader(self):
-        # Update the leader information and state
+    def state_leader(self):
+        # Transition the node to leader state and send heartbeats to maintain leadership
         self.state = "leader"
         self.leader = self.address
 
@@ -122,11 +132,9 @@ class RaftStateMachine:
                 except requests.exceptions.RequestException:
                     logging.warning(f"Could not inform {node} that {self.address} is leader")
 
-        # Start sending heartbeats
-        # threading.Thread(target=self.send_heartbeat, daemon=True).start()
 
-
-    def follower(self): 
+    def state_follower(self): 
+        # Transition the node to follower state and reset election timers   
         self.state = "follower"
         logging.debug(f"Node {self} is now a follower")
         self.votedFor = None 
@@ -135,9 +143,12 @@ class RaftStateMachine:
         self.heartbeat()
         self.reset_follower_timeout()
 
-    def candidate(self): 
-        # If the node is already a leader, just return
+    def state_candidate(self): 
+        # Transition the node to candidate state and initiate a new election
+
+        # If the node is already a leader, it should not become a candidate
         if self.state == "leader":
+            logging.warning(f"Node {self} is already a leader and cannot become a candidate")
             return
         
         logging.debug(f"Node {self} is now a candidate")
@@ -158,24 +169,27 @@ class RaftStateMachine:
 
         # If the node has received votes from a majority of the nodes, it becomes the leader, else it goes back to being a follower
         if votes > len(self.nodes) // 2:
-            self.get_leader() 
+            self.state_leader() 
             logging.info(f"Node {self} has become the leader for term {self.term}")
         else:
             logging.info(f"Node {self} did not receive enough votes, reverting to follower.")
-            self.follower()
+            self.state_follower()
 
     
 
     # ---------- HEARTBEAT & TIMEOUTS ---------- #
 
     def heartbeat(self):
+        # Update when the last heartbeat was received
         self.lastHeartbeat = time.time()
 
     def send_heartbeat(self):
+        # If the node is not a leader, it cannot send heartbeats and should return
         if self.state != "leader":
             logging.warning(f"Node {self} is not a leader and cannot send heartbeats")
             return
         
+        # As long as the node is a leader, it should send heartbeats to all other nodes
         while self.state == "leader": 
             logging.debug(f"Leader {self} is sending heartbeats")
 
@@ -189,14 +203,15 @@ class RaftStateMachine:
             
 
     def check_heartbeat(self):
+        # If the node is a leader, it should send heartbeats
         if self.state == "leader":
             self.send_heartbeat()
             return
 
+        # If the node is a follower, it should check if it has received a heartbeat. If not, it should start an election
         if self.lastHeartbeat is None or (time.time() - self.lastHeartbeat >  TIMEOUT_FOLLOWER_MAX):
             logging.debug(f"Node {self} has not received a heartbeat. Starting election.")
-            self.candidate()
-
+            self.state_candidate()
 
 
     def reset_follower_timeout(self):

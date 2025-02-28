@@ -1,7 +1,7 @@
 #!/bin/bash
 
 scenario=0
-num_servers=3
+num_servers=8
 output_id=$(date "+%Y%m%d-%H%M%S")
 
 addresses=()
